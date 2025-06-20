@@ -1,4 +1,4 @@
-// BUILD 3 snapshot
+// BUILD 4 snapshot
 // src/App.tsx
 import React, { useState, useEffect } from 'react';
 import {
@@ -68,14 +68,17 @@ export default function App() {
   const [course, setCourse] = useState<Course | null>(null);
   const [searchInput, setSearchInput] = useState('');
   const [options, setOptions] = useState<Course[]>([]);
+  const [loadingSearch, setLoadingSearch] = useState(false);
+  const [searchError, setSearchError] = useState<string>();
   const [playTens, setPlayTens] = useState(false);
 
   useEffect(() => {
-    let active = true;
     if (searchInput.length < 2) {
       setOptions([]);
       return;
     }
+    setLoadingSearch(true);
+    setSearchError(undefined);
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
@@ -83,20 +86,21 @@ export default function App() {
           `https://api.golfcourseapi.com/courses/search?keyword=${encodeURIComponent(searchInput)}`,
           { headers: { Authorization: 'Key VLNANFMEVIQBJ6T75A52WMQUKI' }, signal: controller.signal }
         );
-        if (!res.ok) throw new Error(`Search error ${res.status}`);
+        if (!res.ok) throw new Error(`Search error: ${res.status}`);
         const data = await res.json();
-        if (active) setOptions(data.courses || []);
+        setOptions(data.courses || []);
       } catch (err: any) {
         if (err.name !== 'AbortError') {
-          console.error('Search failed', err);
+          setSearchError(err.message);
           setOptions([]);
         }
+      } finally {
+        setLoadingSearch(false);
       }
     }, 300);
     return () => {
       clearTimeout(timer);
       controller.abort();
-      active = false;
     };
   }, [searchInput]);
 
@@ -105,13 +109,13 @@ export default function App() {
       const res = await fetch(`https://api.golfcourseapi.com/courses/${id}`, {
         headers: { Authorization: 'Key VLNANFMEVIQBJ6T75A52WMQUKI' }
       });
-      if (!res.ok) throw new Error('Course not found');
+      if (!res.ok) throw new Error('Course fetch error');
       const { course: raw } = await res.json();
       const normalized: Course = {
         id: raw.id,
         name: raw.name,
         metadata: {
-          totalPar: raw.holes.reduce((s: number, h: any) => s + h.par, 0),
+          totalPar: raw.holes.reduce((sum: number, h: any) => sum + h.par, 0),
           slope: raw.slope,
           rating: raw.rating,
           location: raw.location
@@ -119,214 +123,121 @@ export default function App() {
         holes: raw.holes.map((h: any) => ({ number: h.number, par: h.par, handicap: h.strokeIndex }))
       };
       setCourse(normalized);
-    } catch (err) {
-      console.error('Fetch course failed', err);
+    } catch {
       setCourse(augustaPlaceholder);
     }
   };
 
   const useAugustaCourse = () => setCourse(augustaPlaceholder);
-
-  const addPlayer = () => {
-    if (players.length < 4) {
-      setPlayers(prev => [...prev, { id: Date.now().toString(), name: '', handicap: 0, scores: {}, selectedTens: [] }]);
-    }
-  };
-
-  const updatePlayer = (id: string, updates: Partial<Player>) => {
-    setPlayers(prev => prev.map(p => (p.id === id ? { ...p, ...updates } : p)));
-  };
-
+  const addPlayer = () => { if (players.length < 4) setPlayers(prev => [...prev, { id: Date.now().toString(), name: '', handicap: 0, scores: {}, selectedTens: [] }]); };
+  const updatePlayer = (id: string, updates: Partial<Player>) => setPlayers(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
   const getStrokes = (playerHandicap: number, holeHandicap: number) => {
     if (!course) return 0;
     const base = Math.floor(playerHandicap / course.holes.length);
     const remain = playerHandicap % course.holes.length;
     return base + (holeHandicap <= remain ? 1 : 0);
   };
-
-  const handleScoreChange = (pid: string, holeNumber: number, gross: number) => {
+  const handleScoreChange = (pid: string, holeNum: number, gross: number) => {
     if (!course) return;
     const player = players.find(p => p.id === pid)!;
-    const hole = course.holes.find(h => h.number === holeNumber)!;
+    const hole = course.holes.find(h => h.number === holeNum)!;
     const net = gross - getStrokes(player.handicap, hole.handicap);
-    setPlayers(prev => prev.map(pl => pl.id === pid
-      ? { ...pl, scores: { ...pl.scores, [holeNumber]: gross, [`net_${holeNumber}`]: net } }
-      : pl
-    ));
+    setPlayers(prev => prev.map(pl => pl.id === pid ? { ...pl, scores: { ...pl.scores, [holeNum]: gross, [`net_${holeNum}`]: net } } : pl));
   };
-
   const toggleTenHole = (pid: string, hole: number) => {
-    setPlayers(prev => prev.map(pl => pl.id === pid
-      ? { ...pl, selectedTens: pl.selectedTens.includes(hole)
-          ? pl.selectedTens.filter(hn => hn !== hole)
-          : pl.selectedTens.length < 10
-            ? [...pl.selectedTens, hole]
-            : pl.selectedTens }
-      : pl
-    ));
+    setPlayers(prev => prev.map(pl => pl.id === pid ? { ...pl, selectedTens: pl.selectedTens.includes(hole) ? pl.selectedTens.filter(hn => hn!==hole) : pl.selectedTens.length<10 ? [...pl.selectedTens,hole] : pl.selectedTens } : pl));
   };
-
-  const sumRange = (arr: number[], getter: (n: number) => number) => arr.reduce((s,n) => s + getter(n), 0);
+  const sumRange = (arr: number[], fn: (n: number) => number) => arr.reduce((s,n) => s+fn(n),0);
 
   return (
-    <Container sx={{ py: 4 }}>
-      {/* Players Section */}
-      <Box component={Paper} sx={{ p: 2, mb: 4 }}>
+    <Container sx={{ py:4 }}>
+      <Box component={Paper} sx={{p:2,mb:4}}>
         <Typography variant="h6">Players</Typography>
-        {players.map((pl, i) => (
-          <Box key={pl.id} sx={{ display: 'flex', gap: 2, mb: 1 }}>
-            <TextField label={`Player ${i + 1}`} value={pl.name} onChange={e => updatePlayer(pl.id, { name: e.target.value })} />
-            <TextField label="Handicap" type="number" value={pl.handicap} onChange={e => updatePlayer(pl.id, { handicap: +e.target.value })} sx={{ width: 100 }} />
+        {players.map((pl,i)=>(
+          <Box key={pl.id} sx={{display:'flex',gap:2,mb:1}}>
+            <TextField label={`Player ${i+1}`} value={pl.name} onChange={e=>updatePlayer(pl.id,{name:e.target.value})} />
+            <TextField label="Handicap" type="number" value={pl.handicap} onChange={e=>updatePlayer(pl.id,{handicap:+e.target.value})} sx={{width:100}} />
           </Box>
         ))}
-        <Button variant="contained" onClick={addPlayer} disabled={players.length >= 4}>Add Player</Button>
+        <Button variant="contained" onClick={addPlayer} disabled={players.length>=4}>Add Player</Button>
       </Box>
-
-      {/* Course Search Section */}
-      <Box component={Paper} sx={{ p: 2, mb: 4 }}>
+      <Box component={Paper} sx={{p:2,mb:4}}>
         <Typography variant="h6">Course Search</Typography>
         <Autocomplete
           value={course}
           options={options}
+          loading={loadingSearch}
+          noOptionsText={searchError || 'No courses found'}
           getOptionLabel={opt => opt.name}
-          onInputChange={(_,v) => setSearchInput(v)}
-          onChange={(_,v) => v && fetchCourseById(v.id)}
-          renderInput={params => <TextField {...params} label="Search Course" fullWidth />}  
-        />
-        <Button variant="outlined" sx={{ mt:2 }} onClick={useAugustaCourse}>Use Augusta</Button>
-        <FormControlLabel control={<Switch checked={playTens} onChange={e => setPlayTens(e.target.checked)} />} label="Play 10s?" sx={{ mt:2, ml:2 }} />
+          onInputChange={(_, v) => setSearchInput(v)}
+          onChange={(_, v) => v && fetchCourseById(v.id)}
+          renderInput={params => <TextField {...params} label="Search Course" fullWidth />}
+        />}
+        />}
+        />}
+        />}
+        />}
+        />} />
+        <Button variant="outlined" sx={{mt:2}} onClick={useAugustaCourse}>Use Augusta</Button>
+        <FormControlLabel control={<Switch checked={playTens} onChange={e=>setPlayTens(e.target.checked)} />} label="Play 10s?" sx={{ml:2}} />
       </Box>
-
-      {/* Scorecard Section */}
       {course && (
-        <>  
+        <>
           <Typography variant="h4" gutterBottom>Golf Score Tracker</Typography>
-          <Table component={Paper} sx={{ mt:2 }}>
+          <Table component={Paper} sx={{mt:2}}>
             <TableHead>
               <TableRow>
-                <TableCell>Player</TableCell>
-                {course.holes.map(h => (<TableCell key={h.number} align="center">{h.number}</TableCell>))}
+                {course.holes.map(h=>(<TableCell key={h.number} align="center"><Typography>{h.number}</Typography></TableCell>))}
                 <TableCell align="center">Front 9</TableCell>
                 <TableCell align="center">Back 9</TableCell>
                 <TableCell align="center">Total</TableCell>
               </TableRow>
               <TableRow>
-                <TableCell>Hcp</TableCell>
-                {course.holes.map(h => (<TableCell key={h.number} align="center">{h.handicap}</TableCell>))}
-                <TableCell/> <TableCell/> <TableCell/>
+                {course.holes.map(h=>(<TableCell key={h.number} align="center"><Typography variant="caption">{h.handicap}</Typography></TableCell>))}
+                <TableCell /><TableCell /><TableCell />
               </TableRow>
               <TableRow>
-                <TableCell>Par</TableCell>
-                {course.holes.map(h => (<TableCell key={h.number} align="center">{h.par}</TableCell>))}
-                <TableCell align="center">{course.holes.slice(0,9).reduce((sum,h)=>sum+h.par,0)}</TableCell>
-                <TableCell align="center">{course.holes.slice(9).reduce((sum,h)=>sum+h.par,0)}</TableCell>
-                <TableCell align="center">{course.metadata.totalPar}</TableCell>
+                {course.holes.map(h=>(<TableCell key={h.number} align="center"><Typography variant="caption">{h.par}</Typography></TableCell>))}
+                <TableCell align="center"><Typography variant="caption">{sumRange(course.holes.slice(0,9).map(h=>h.number),n=>course.holes.find(x=>x.number===n)!.par)}</Typography></TableCell>
+                <TableCell align="center"><Typography variant="caption">{sumRange(course.holes.slice(9).map(h=>h.number),n=>course.holes.find(x=>x.number===n)!.par)}</Typography></TableCell>
+                <TableCell align="center"><Typography variant="caption">{course.metadata.totalPar}</Typography></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-  {players.map(pl => {
-    // calculate front/back/total gross & net
-    const frontHoles = course.holes.slice(0, 9).map(h => h.number);
-    const backHoles  = course.holes.slice(9).map(h => h.number);
-    const frontGross = frontHoles.reduce((sum, n) => sum + (pl.scores[n] || 0), 0);
-    const backGross  = backHoles .reduce((sum, n) => sum + (pl.scores[n] || 0), 0);
-    const totalGross = frontGross + backGross;
-    const frontNet   = frontHoles.reduce((sum, n) => sum + (pl.scores[`net_${n}`] || 0), 0);
-    const backNet    = backHoles .reduce((sum, n) => sum + (pl.scores[`net_${n}`] || 0), 0);
-    const totalNet   = frontNet + backNet;
-
-    return (
-      <TableRow key={pl.id}>
-        <TableCell>{pl.name || '—'}</TableCell>
-
-        {course.holes.map(h => {
-          const strokes = getStrokes(pl.handicap, h.handicap);
-          return (
-            <TableCell key={h.number} align="center" sx={{ p: 0.5 }}>
-              <Typography variant="caption">+{strokes}</Typography>
-              <Box
-                sx={{
-                  width: 40,
-                  height: 50,
-                  mx: 'auto',
-                  border: '1px solid',
-                  borderColor: 'grey.400',
-                  borderRadius: 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <input
-  type="text"
-  inputMode="numeric"
-  pattern="[0-9]*"
-  value={pl.scores[h.number] || ''}
-  onChange={e => handleScoreChange(pl.id, h.number, Number(e.target.value) || 0)}
-  style={{
-    width: '100%',
-    height: '100%',
-    lineHeight: '50px',
-    textAlign: 'center',
-    border: 'none',
-    outline: 'none',
-    fontSize: '1rem',
-    padding: 0,
-    boxSizing: 'border-box',
-  }}
-/>
-              </Box>
-              <Typography variant="caption">Net: {pl.scores[`net_${h.number}`] || ''}</Typography>
-              <Button
-                size="small"
-                variant={pl.selectedTens.includes(h.number) ? 'contained' : 'outlined'}
-                onClick={() => toggleTenHole(pl.id, h.number)}
-                sx={{ mt: 0.5, visibility: playTens ? 'visible' : 'hidden' }}
-              >
-                10
-              </Button>
-            </TableCell>
-          );
-        })}
-
-        {[
-          { strokes: frontHoles.reduce((sum, n) => sum + getStrokes(pl.handicap, course.holes.find(x => x.number === n)!.handicap), 0), gross: frontGross, net: frontNet },
-          { strokes: backHoles .reduce((sum, n) => sum + getStrokes(pl.handicap, course.holes.find(x => x.number === n)!.handicap), 0), gross: backGross, net: backNet },
-          { strokes: 0,                            gross: totalGross,                     net: totalNet },
-        ].map((sec, idx) => (
-          <TableCell key={idx} align="center" sx={{ p: 0.5 }}>
-            <Typography variant="caption">+{sec.strokes}</Typography>
-            <Box
-              sx={{
-                width: 40,
-                height: 50,
-                mx: 'auto',
-                border: '1px solid',
-                borderColor: 'grey.400',
-                borderRadius: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Typography sx={{ fontSize: '1rem' }}>{sec.gross}</Typography>
-            </Box>
-            <Typography variant="caption">Net: {sec.net}</Typography>
-          </TableCell>
-        ))}
-      </TableRow>
-    );
-  })}
-</TableBody>
+              {players.map(pl=>{
+                const frontH=course.holes.slice(0,9).map(h=>h.number);
+                const backH=course.holes.slice(9).map(h=>h.number);
+                const fg=sumRange(frontH,n=>pl.scores[n]||0);
+                const bg=sumRange(backH,n=>pl.scores[n]||0);
+                const fn=sumRange(frontH,n=>pl.scores[`net_${n}`]||0);
+                const bn=sumRange(backH,n=>pl.scores[`net_${n}`]||0);
+                const tg=fg+bg, tn=fn+bn;
+                return (
+                  <TableRow key={pl.id}>
+                    {course.holes.map(h=>{
+                      const strokes=getStrokes(pl.handicap,h.handicap);
+                      return (
+                        <TableCell key={h.number} align="center" sx={{width:40,height:50,p:0}}>
+                          <Typography variant="caption">+{strokes}</Typography>
+                          <Box sx={{width:'100%',height:'100%',position:'relative'}}>
+                            {playTens&&<Button size="small" variant={pl.selectedTens.includes(h.number)?'contained':'outlined'} onClick={()=>toggleTenHole(pl.id,h.number)} sx={{position:'absolute',top:0,left:0,width:'100%',height:'100%',p:0}}>10</Button>}
+                            <TextField type="text" inputMode="numeric" pattern="[0-9]*" value={pl.scores[h.number]||''} onChange={e=>handleScoreChange(pl.id,h.number,Number(e.target.value)||0)} sx={{position:'absolute',top:0,left:0,width:'100%',height:'100%','& .MuiInputBase-input':{textAlign:'center'}}} />
+                            <Typography variant="caption" sx={{position:'absolute',bottom:0,width:'100%',textAlign:'center'}}>Net: {pl.scores[`net_${h.number}`]||''}</Typography>
+                          </Box>
+                        </TableCell>
+                      );
+                    })}
+                    <TableCell align="center"><Box sx={{width:40,height:50,position:'relative'}}><TextField type="text" inputMode="numeric" pattern="[0-9]*" value={fg} InputProps={{readOnly:true}} sx={{position:'absolute',top:0,left:0,width:'100%',height:'100%','& .MuiInputBase-input':{textAlign:'center'}}} /></Box><Typography variant="caption">Net: {fn}</Typography></TableCell>
+                    <TableCell align="center"><Box sx={{width:40,height:50,position:'relative'}}><TextField type="text" inputMode="numeric" pattern="[0-9]*" value={bg} InputProps={{readOnly:true}} sx={{position:'absolute',top:0,left:0,width:'100%',height:'100%','& .MuiInputBase-input':{textAlign:'center'}}} /></Box><Typography variant="caption">Net: {bn}</Typography></TableCell>
+                    <TableCell align="center"><Box sx={{width:40,height:50,position:'relative'}}><TextField type="text" inputMode="numeric" pattern="[0-9]*" value={tg} InputProps={{readOnly:true}} sx={{position:'absolute',top:0,left:0,width:'100%',height:'100%','& .MuiInputBase-input':{textAlign:'center'}}} /></Box><Typography variant="caption">Net: {tn}</Typography></TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
           </Table>
-
-          {playTens&&<Box component={Paper} sx={{p:2,mt:4}}><Typography variant="h6">Game of 10s</Typography>{players.map(pl=>{
-            const ou = pl.selectedTens.reduce((s,h)=>(s+(pl.scores[`net_${h}`]||0)-course.holes.find(x=>x.number===h)!.par),0);
-            const ts = pl.selectedTens.reduce((s,h)=>(s+(pl.scores[`net_${h}`]||0)),0);
-            return <Box key={pl.id} sx={{mb:2}}><Typography>{pl.name}</Typography><Typography>Selected: {pl.selectedTens.length}/10</Typography><Typography>Total: {ts} ({ou>=0?'+':''}{ou})</Typography></Box>;
-          })}</Box>}
         </>
       )}
     </Container>
   );
 }
+
