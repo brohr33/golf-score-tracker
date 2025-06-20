@@ -1,7 +1,7 @@
 {
   "name": "golf-score-tracker",
   "version": "0.1.0",
-  "homepage": "https:/brohr33.github.io/golf-score-tracker",
+  "homepage": "https://brohr33.github.io/golf-score-tracker",
   "private": true,
   "dependencies": {
     "@emotion/react": "^11.14.0",
