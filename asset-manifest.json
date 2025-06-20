@@ -1,15 +1,15 @@
 {
   "files": {
     "main.css": "/golf-score-tracker/static/css/main.e6c13ad2.css",
-    "main.js": "/golf-score-tracker/static/js/main.c366ea7e.js",
+    "main.js": "/golf-score-tracker/static/js/main.b174f6d6.js",
     "static/js/453.9963047d.chunk.js": "/golf-score-tracker/static/js/453.9963047d.chunk.js",
     "index.html": "/golf-score-tracker/index.html",
     "main.e6c13ad2.css.map": "/golf-score-tracker/static/css/main.e6c13ad2.css.map",
-    "main.c366ea7e.js.map": "/golf-score-tracker/static/js/main.c366ea7e.js.map",
+    "main.b174f6d6.js.map": "/golf-score-tracker/static/js/main.b174f6d6.js.map",
     "453.9963047d.chunk.js.map": "/golf-score-tracker/static/js/453.9963047d.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.e6c13ad2.css",
-    "static/js/main.c366ea7e.js"
+    "static/js/main.b174f6d6.js"
   ]
 }
